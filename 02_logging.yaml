@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Account-wide logging stack.
+  CloudTrail (management events + optional S3 data events) and log storage.
+  This stack is global/account-level and NOT environment- or project-specific.
+
+Parameters:
+  EnableS3DataEvents:
+    Type: String
+    AllowedValues: [true, false]
+    Default: false
+    Description: Enable S3 data events (Put/Get/Delete). Costs may increase.
+
+Resources:
+  CloudTrailKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for CloudTrail logs
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowRootAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowCloudTrail
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:GenerateDataKey*
+              - kms:Decrypt
+            Resource: '*'
+
+  CloudTrailKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/security-cloudtrail
+      TargetKeyId: !Ref CloudTrailKmsKey
+
+  CloudTrailLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CloudTrailKmsKey
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudTrailLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${CloudTrailLogBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AllowCloudTrailGetAcl
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailLogBucket.Arn
+
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: account-cloudtrail
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      KMSKeyId: !Ref CloudTrailKmsKey
+      S3BucketName: !Ref CloudTrailLogBucket
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+        - !If
+          - EnableS3DataEventsCondition
+          - DataResources:
+              - Type: AWS::S3::Object
+                Values: ['arn:aws:s3:::']
+            ReadWriteType: All
+            IncludeManagementEvents: false
+          - !Ref AWS::NoValue
+
+Conditions:
+  EnableS3DataEventsCondition: !Equals [!Ref EnableS3DataEvents, true]
+
+Outputs:
+  CloudTrailBucketName:
+    Description: S3 bucket storing CloudTrail logs
+    Value: !Ref CloudTrailLogBucket

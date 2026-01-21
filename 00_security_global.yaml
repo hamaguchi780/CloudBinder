@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Account-wide security baseline.
+  GuardDuty with Malware Protection for S3 enabled.
+  This stack is global/account-level and NOT environment- or project-specific.
+
+Resources:
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+      Enable: true
+
+  GuardDutyMalwareProtectionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: guardduty-malware-protection-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: guardduty.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonGuardDutyMalwareProtectionServiceRolePolicy
+
+  GuardDutyMalwareProtection:
+    Type: AWS::GuardDuty::MalwareProtectionPlan
+    Properties:
+      Role: !GetAtt GuardDutyMalwareProtectionRole.Arn
+      ProtectedResource:
+        S3Bucket:
+          BucketName: '*'  # Account-wide S3 coverage
+
+Outputs:
+  GuardDutyDetectorId:
+    Description: GuardDuty Detector ID
+    Value: !Ref GuardDutyDetector

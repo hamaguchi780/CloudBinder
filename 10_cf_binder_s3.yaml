@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Binder - S3 bucket per client (Presigned URL only)
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [prod, stg]
+  ClientCN:
+    Type: String
+
+Resources:
+  BinderBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "binder-${Env}-${ClientCN}"
+      VersioningConfiguration: { Status: Enabled }
+
+  BinderBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BinderBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyNonPresignedAccess
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::binder-${Env}-${ClientCN}"
+              - !Sub "arn:aws:s3:::binder-${Env}-${ClientCN}/*"
+            Condition:
+              StringNotEquals:
+                s3:authType: REST-QUERY-STRING
+
+Outputs:
+  BucketName:
+    Value: !Ref BinderBucket
