@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Route53 Hosted Zone and ACM certificate for API Gateway custom domain.
+  This stack is account-level but domain-specific. Not environment-specific.
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Base domain name (e.g. example.jp)
+
+  ApiSubDomain:
+    Type: String
+    Default: ""
+    Description: Optional subdomain prefix for API (e.g. backup.api). Leave empty to use apex domain.
+
+Resources:
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref DomainName
+
+  UseSubDomainCondition:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !If
+        - HasSubDomain
+        - !Sub "${ApiSubDomain}.${DomainName}"
+        - !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !If
+            - HasSubDomain
+            - !Sub "${ApiSubDomain}.${DomainName}"
+            - !Ref DomainName
+          HostedZoneId: !Ref HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref DomainName
+
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub "${ApiSubDomain}.${DomainName}"
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub "${ApiSubDomain}.${DomainName}"
+          HostedZoneId: !Ref HostedZone
+
+Conditions:
+  HasSubDomain: !Not [ !Equals [ !Ref ApiSubDomain, "" ] ]
+
+Outputs:
+  HostedZoneId:
+    Description: Route53 Hosted Zone ID
+    Value: !Ref HostedZone
+
+  ApiCertificateArn:
+    Description: ACM certificate ARN for API Gateway
+    Value: !Ref ApiCertificate
+    Export:
+      Name: api-acm-certificate-arn
