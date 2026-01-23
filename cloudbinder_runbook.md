@@ -34,14 +34,14 @@ AWS 側およびクライアント側の運用手順を体系的にまとめた 
 ### 2.1 アカウント共通スタック
 
 | Stack | 内容 | 備考 |
-|---|---|---|
+| --- | --- | --- |
 | 00-security-global | GuardDuty / Malware Protection for S3 | 1アカウント1回 |
 | 02-logging | CloudTrail / 監査ログ用 S3 / KMS | Env 非依存 |
 
 ### 2.2 アプリケーションスタック（Env ごと）
 
 | Stack | 内容 |
-|---|---|
+| --- | --- |
 | cf_binder_s3 | バックアップ用 S3 バケット |
 | cf_binder_lambda_api | API Gateway / Lambda / IAM |
 
@@ -59,7 +59,7 @@ aws cloudformation deploy \
   --stack-name security-global
 ```
 
-**確認事項**
+##### 確認事項
 
 - GuardDuty Detector が ENABLED
 - Malware Protection が S3 全体を対象
@@ -74,7 +74,7 @@ aws cloudformation deploy \
   --stack-name logging
 ```
 
-**確認事項**
+##### 確認事項
 
 - CloudTrail が Multi-Region
 - S3 にログが出力され始めている
@@ -92,7 +92,7 @@ aws cloudformation deploy \
   --parameter-overrides Env=stg
 ```
 
-**確認事項**
+##### 確認事項
 
 - SSE-S3 有効
 - Presigned URL 以外のアクセスが拒否される
@@ -108,7 +108,7 @@ aws cloudformation deploy \
   --parameter-overrides Env=stg
 ```
 
-**確認事項**
+#### 確認事項
 
 - mTLS が有効
 - Lambda が S3 操作を直接行っていない
@@ -123,7 +123,7 @@ aws cloudformation deploy \
 - CN は端末ごとに一意
 - CN 変更＝新端末扱い
 
-**失効時対応**
+#### 失効時対応
 
 - 証明書失効
 - API Gateway への接続不可となる
@@ -152,7 +152,7 @@ aws cloudformation deploy \
 ### 5.2 障害対応
 
 | 事象 | 確認ポイント |
-|---|---|
+| --- | --- |
 | API が 401 | 証明書 CN / 失効確認 |
 | S3 403 | URL 期限切れ |
 | Upload 失敗 | バケット存在 / 権限 |
