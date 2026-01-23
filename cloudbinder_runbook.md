@@ -1,7 +1,6 @@
-# CloudBinder 運用手順書
+# CloudBinder まとめ
 
-本書は、CloudBinder プロジェクトにおける **設計確定後〜本番運用まで** の
-AWS 側およびクライアント側の運用手順を体系的にまとめた Runbook である。
+本書は、CloudBinder プロジェクトにおける概要である。
 
 ---
 

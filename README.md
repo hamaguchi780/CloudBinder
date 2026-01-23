@@ -1,4 +1,4 @@
-# CloudBinder
+# CloudFormation
 
 クラウドバインダー実装用
 事前に用意するもの（初回のみ）
