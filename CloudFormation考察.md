@@ -1,6 +1,6 @@
-# CloudBinder まとめ
+# CloudFormation まとめ
 
-本書は、CloudBinder プロジェクトにおける概要である。
+本書は、CloudBinder プロジェクトにおけるCloudFormation概要である。
 
 ---
 
