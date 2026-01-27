@@ -267,6 +267,93 @@ aws apigatewayv2 create-stage \
 
 ---
 
+## 7. API Gateway（HTTP API）mTLS 設定
+
+本章では、HTTP API に **双方向TLS（mTLS）** を適用し、
+クライアント証明書を持つ端末のみが API を利用できるようにする。
+
+---
+
+### 7.1 Truststore 用 S3 バケット作成
+
+クライアント証明書を検証するための **CA証明書格納用バケット**を作成する。
+
+```bash
+aws s3api create-bucket \
+  --bucket mtls-truststore-bucket-sample \
+  --region ap-northeast-1 \
+  --create-bucket-configuration LocationConstraint=ap-northeast-1
+```
+
+※ 本バケットは **公開不可** とし、管理者のみが更新する。
+
+---
+
+### 7.2 CA証明書（PEM）アップロード
+
+ACM Private CA のルート／中間CA証明書（PEM形式）をアップロードする。
+
+```bash
+aws s3 cp ca.pem s3://mtls-truststore-bucket-sample/ca.pem
+```
+
+---
+
+### 7.3 API 用 ACM 証明書の準備
+
+API Gateway のカスタムドメイン用に **ACM（Public）証明書**を使用する。
+（Private CA 証明書は使用不可）
+
+※ 本手順では ACM 証明書 ARN は既存とする。
+
+---
+
+### 7.4 カスタムドメイン作成（mTLS 有効化）
+
+```bash
+aws apigatewayv2 create-domain-name \
+  --domain-name api.example.local \
+  --domain-name-configurations CertificateArn=<ACM_CERT_ARN>,EndpointType=REGIONAL,SecurityPolicy=TLS_1_3 \
+  --mutual-tls-authentication TruststoreUri=s3://mtls-truststore-bucket-sample/ca.pem
+```
+
+---
+
+### 7.5 API マッピング設定
+
+```bash
+aws apigatewayv2 create-api-mapping \
+  --api-id <API_ID> \
+  --domain-name api.example.local \
+  --stage $default
+```
+
+---
+
+### 7.6 Route 53 レコード設定
+
+カスタムドメインを API Gateway に向ける。
+
+```bash
+aws route53 change-resource-record-sets \
+  --hosted-zone-id <HOSTED_ZONE_ID> \
+  --change-batch file://route53-api.json
+```
+
+---
+
+### 7.7 動作確認（重要）
+
+- クライアント証明書 **なし** → TLS ハンドシェイクで失敗
+- 無効な証明書 → 403
+- 有効な証明書 → Lambda が起動し Presigned URL 発行
+
+---
+
+※ Truststore 更新時は S3 上の PEM ファイル差し替えのみで反映される。
+
+---
+
 ## 7. API Gateway mTLS 設定
 
 ### 7.1 信頼ストア用 S3 バケット作成
