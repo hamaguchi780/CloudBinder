@@ -178,47 +178,92 @@ aws lambda create-function \
 
 ## 6. API Gateway（HTTP API）作成
 
-※ 設計方針変更：REST API ではなく **HTTP API** を採用する
-（低コスト・低レイテンシ・mTLS対応要件を満たすため）
-
-### 6.1 API 作成
+### 6.1 HTTP API 作成
 
 ```bash
 aws apigatewayv2 create-api \
-  --name presign-api \
-  --protocol-type HTTP \
-  --name presign-api \
-  --endpoint-configuration types=REGIONAL
+  --name presign-http-api \
+  --protocol-type HTTP
 ```
 
-### 6.2 リソース／メソッド作成
+出力される `ApiId` を控える。
+
+---
+
+### 6.2 Lambda Integration 作成
 
 ```bash
-aws apigateway create-resource \
-  --rest-api-id <API_ID> \
-  --parent-id <ROOT_ID> \
-  --path-part presign
+aws apigatewayv2 create-integration \
+  --api-id <API_ID> \
+  --integration-type AWS_PROXY \
+  --integration-uri arn:aws:lambda:ap-northeast-1:<ACCOUNT_ID>:function:presign-url-function \
+  --payload-format-version 2.0
+```
+
+出力される `IntegrationId` を控える。
+
+---
+
+### 6.3 Route（ルーティング）作成
+
+本APIでは制御ロジックをすべてLambdaに集約するため、
+すべて同一Integrationを使用する。
+
+```bash
+aws apigatewayv2 create-route \
+  --api-id <API_ID> \
+  --route-key "POST /presign/put" \
+  --target integrations/<INTEGRATION_ID>
 ```
 
 ```bash
-aws apigateway put-method \
-  --rest-api-id <API_ID> \
-  --resource-id <RESOURCE_ID> \
-  --http-method POST \
-  --authorization-type NONE
+aws apigatewayv2 create-route \
+  --api-id <API_ID> \
+  --route-key "POST /presign/get" \
+  --target integrations/<INTEGRATION_ID>
 ```
-
-### 6.3 Lambda 統合
 
 ```bash
-aws apigateway put-integration \
-  --rest-api-id <API_ID> \
-  --resource-id <RESOURCE_ID> \
-  --http-method POST \
-  --type AWS_PROXY \
-  --integration-http-method POST \
-  --uri arn:aws:apigateway:ap-northeast-1:lambda:path/2015-03-31/functions/<LAMBDA_ARN>/invocations
+aws apigatewayv2 create-route \
+  --api-id <API_ID> \
+  --route-key "POST /presign/delete" \
+  --target integrations/<INTEGRATION_ID>
 ```
+
+```bash
+aws apigatewayv2 create-route \
+  --api-id <API_ID> \
+  --route-key "POST /presign/list" \
+  --target integrations/<INTEGRATION_ID>
+```
+
+---
+
+### 6.4 Lambda 実行許可付与
+
+```bash
+aws lambda add-permission \
+  --function-name presign-url-function \
+  --statement-id apigateway-invoke \
+  --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn arn:aws:execute-api:ap-northeast-1:<ACCOUNT_ID>:<API_ID>/*
+```
+
+---
+
+### 6.5 Stage 作成（$default）
+
+```bash
+aws apigatewayv2 create-stage \
+  --api-id <API_ID> \
+  --stage-name $default \
+  --auto-deploy
+```
+
+---
+
+※ 本段階では mTLS は未設定。通信制御は後続手順で実施する。
 
 ---
 
