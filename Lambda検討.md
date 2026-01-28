@@ -1,4 +1,4 @@
-# このLambdaは「何をするものか」
+# このLambda(binder_lambda.py)は「何をするものか」
 
 一言で言うと：
 

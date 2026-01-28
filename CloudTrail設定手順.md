@@ -115,6 +115,9 @@ CloudTrail を設定する作業者は、以下の権限を有していること
 * AWS Certificate Manager
 * ACM Private CA
 * CloudTrail
+* GuardDuty
+* Route53
+* AWS KMS
 
 1. 設定内容を確認し、「次へ」をクリックする
 
