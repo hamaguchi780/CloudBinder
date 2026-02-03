@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Account-wide security baseline stack.
+  Provides audit, detection, and configuration tracking.
+  This stack is global/account-level and NOT environment- or project-specific.
+
+########################################
+# Resources
+########################################
+
+Resources:
+
+  ########################################
+  # KMS (for CloudTrail / Config logs)
+  ########################################
+
+  SecurityLogsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for CloudTrail and AWS Config logs
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowRootAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
+
+          - Sid: AllowCloudTrailUse
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:GenerateDataKey*
+              - kms:Decrypt
+            Resource: '*'
+
+          - Sid: AllowConfigUse
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - kms:GenerateDataKey*
+              - kms:Decrypt
+            Resource: '*'
+
+  SecurityLogsKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/security-logs
+      TargetKeyId: !Ref SecurityLogsKmsKey
+
+  ########################################
+  # S3 Bucket for Logs
+  ########################################
+
+  SecurityLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref SecurityLogsKmsKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SecurityLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SecurityLogsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # CloudTrail write
+          - Sid: AllowCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${SecurityLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+          - Sid: AllowCloudTrailGetAcl
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt SecurityLogsBucket.Arn
+
+          # AWS Config write
+          - Sid: AllowConfigWrite
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${SecurityLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+          - Sid: AllowConfigGetAcl
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt SecurityLogsBucket.Arn
+
+  ########################################
+  # CloudTrail
+  ########################################
+
+  AccountCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: account-cloudtrail
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      KMSKeyId: !Ref SecurityLogsKmsKey
+      S3BucketName: !Ref SecurityLogsBucket
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+
+  ########################################
+  # AWS Config
+  ########################################
+
+  ConfigRecorderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSConfigRole
+
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      RoleARN: !GetAtt ConfigRecorderRole.Arn
+      RecordingGroup:
+        AllSupported: false
+        ResourceTypes:
+          - AWS::S3::Bucket
+          - AWS::KMS::Key
+          - AWS::IAM::Role
+          - AWS::IAM::Policy
+          - AWS::CloudTrail::Trail
+          - AWS::ApiGatewayV2::Api
+          - AWS::Lambda::Function
+
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Properties:
+      S3BucketName: !Ref SecurityLogsBucket
+
+  ########################################
+  # AWS Config Rules (minimum set)
+  ########################################
+
+  ConfigRuleS3PublicRead:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: s3-bucket-public-read-prohibited
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_PUBLIC_READ_PROHIBITED
+
+  ConfigRuleS3PublicWrite:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: s3-bucket-public-write-prohibited
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_PUBLIC_WRITE_PROHIBITED
+
+  ConfigRuleS3Encryption:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: s3-bucket-server-side-encryption-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED
+
+  ConfigRuleS3Versioning:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: s3-bucket-versioning-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_VERSIONING_ENABLED
+
+  ConfigRuleCloudTrailEnabled:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: cloudtrail-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUD_TRAIL_ENABLED
+
+  ########################################
+  # GuardDuty (Detection only)
+  ########################################
+
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+      Enable: true
+
+########################################
+# Outputs
+########################################
+
+Outputs:
+  LogsBucketName:
+    Description: S3 bucket for security logs
+    Value: !Ref SecurityLogsBucket
+
+  CloudTrailName:
+    Description: CloudTrail name
+    Value: !Ref AccountCloudTrail
+
+  GuardDutyDetectorId:
+    Description: GuardDuty detector ID
+    Value: !Ref GuardDutyDetector

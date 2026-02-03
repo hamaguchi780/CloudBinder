@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Binder - API Gateway HTTP API with mTLS
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [prod, stg]
+
+  ApiNamePrefix:
+    Type: String
+    Default: binder
+
+  StageName:
+    Type: String
+    Default: "$default"
+    Description: Use $default for HTTP API
+
+  DomainName:
+    Type: String
+    Description: Custom domain name for API Gateway (e.g. binder-prod.example.com)
+
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN for API Gateway custom domain
+
+  TrustStoreBucket:
+    Type: String
+    Description: S3 bucket name which stores CA certificate for mTLS truststore
+
+  TrustStoreKey:
+    Type: String
+    Description: Object key of CA certificate (PEM) in truststore bucket
+
+  ApiRateLimit:
+    Type: Number
+    Default: 2
+
+  ApiBurstLimit:
+    Type: Number
+    Default: 5
+
+Resources:
+  # ------------------------------------------------------------
+  # HTTP API
+  # ------------------------------------------------------------
+  BinderHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${ApiNamePrefix}-${Env}-http-api"
+      ProtocolType: HTTP
+
+  # ------------------------------------------------------------
+  # Stage
+  # ------------------------------------------------------------
+  BinderApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref BinderHttpApi
+      StageName: !Ref StageName
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ApiRateLimit
+        ThrottlingBurstLimit: !Ref ApiBurstLimit
+
+  # ------------------------------------------------------------
+  # Custom Domain + mTLS
+  # ------------------------------------------------------------
+  BinderApiDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CertificateArn
+          EndpointType: REGIONAL
+      MutualTlsAuthentication:
+        TruststoreUri: !Sub "s3://${TrustStoreBucket}/${TrustStoreKey}"
+
+  # ------------------------------------------------------------
+  # API Mapping
+  # ------------------------------------------------------------
+  BinderApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    DependsOn: BinderApiStage
+    Properties:
+      ApiId: !Ref BinderHttpApi
+      DomainName: !Ref BinderApiDomain
+      Stage: !Ref StageName
+
+Outputs:
+  HttpApiId:
+    Description: HTTP API ID
+    Value: !Ref BinderHttpApi
+
+  ApiInvokeUrl:
+    Description: Default invoke URL (without custom domain)
+    Value: !Sub "https://${BinderHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  ApiCustomDomainUrl:
+    Description: Custom domain endpoint
+    Value: !Sub "https://${DomainName}"

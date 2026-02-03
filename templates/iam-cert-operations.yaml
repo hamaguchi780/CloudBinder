@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Common IAM Role for Certificate Operations
+  Used for issuing, exporting, and revoking client certificates
+
+############################################################
+# Parameters
+############################################################
+Parameters:
+  RoleName:
+    Type: String
+    Default: iam-cert-operations-role
+    Description: IAM role name for certificate operations
+
+############################################################
+# Resources
+############################################################
+
+CertificateOperationsRole:
+  Type: AWS::IAM::Role
+  Properties:
+    RoleName: !Ref RoleName
+    AssumeRolePolicyDocument:
+      Version: '2012-10-17'
+      Statement:
+        - Effect: Allow
+          Principal:
+            AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+          Action: sts:AssumeRole
+    Description: >
+      IAM role for issuing/exporting/revoking client certificates
+      via ACM and AWS Private CA.
+    MaxSessionDuration: 3600
+
+    Policies:
+      - PolicyName: cert-operations-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+
+            # --------------------------------------------
+            # ACM Private Certificate Operations
+            # --------------------------------------------
+            - Effect: Allow
+              Action:
+                - acm:RequestCertificate
+                - acm:DescribeCertificate
+                - acm:ExportCertificate
+                - acm:DeleteCertificate
+              Resource: "*"
+
+            # --------------------------------------------
+            # AWS Private CA Operations
+            # --------------------------------------------
+            - Effect: Allow
+              Action:
+                - acm-pca:IssueCertificate
+                - acm-pca:GetCertificate
+                - acm-pca:RevokeCertificate
+                - acm-pca:DescribeCertificateAuthority
+              Resource: "*"
+
+            # --------------------------------------------
+            # Read-only access for CRL / audit
+            # --------------------------------------------
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource: "*"
+
+############################################################
+# Outputs
+############################################################
+Outputs:
+  CertificateOperationsRoleArn:
+    Description: ARN of the IAM role for certificate operations
+    Value: !GetAtt CertificateOperationsRole.Arn

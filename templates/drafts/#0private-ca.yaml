@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS Private CA (Root CA) for Client Certificate Issuance
+
+Parameters:
+  CaCommonName:
+    Type: String
+    Default: backup-client-root-ca
+    Description: Common Name for Root CA
+
+  OrganizationName:
+    Type: String
+    Default: Example Medical System
+
+  OrganizationalUnit:
+    Type: String
+    Default: IT
+
+  CountryCode:
+    Type: String
+    Default: JP
+
+  CaValidityYears:
+    Type: Number
+    Default: 10
+    Description: CA validity period (years)
+
+Resources:
+
+  PrivateCaCrlBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  PrivateRootCA:
+    Type: AWS::ACMPCA::CertificateAuthority
+    Properties:
+      Type: ROOT
+      KeyAlgorithm: RSA_4096
+      SigningAlgorithm: SHA384WITHRSA
+      Subject:
+        CommonName: !Ref CaCommonName
+        Organization: !Ref OrganizationName
+        OrganizationalUnit: !Ref OrganizationalUnit
+        Country: !Ref CountryCode
+      RevocationConfiguration:
+        CrlConfiguration:
+          Enabled: true
+          S3BucketName: !Ref PrivateCaCrlBucket
+      PermanentDeletionTimeInDays: 30
+
+  PrivateRootCACertificate:
+    Type: AWS::ACMPCA::Certificate
+    Properties:
+      CertificateAuthorityArn: !Ref PrivateRootCA
+      CertificateSigningRequest: !GetAtt PrivateRootCA.CertificateSigningRequest
+      SigningAlgorithm: SHA384WITHRSA
+      TemplateArn: arn:aws:acm-pca:::template/RootCACertificate/V1
+      Validity:
+        Type: YEARS
+        Value: !Ref CaValidityYears
+
+  ActivatePrivateRootCA:
+    Type: AWS::ACMPCA::CertificateAuthorityActivation
+    Properties:
+      CertificateAuthorityArn: !Ref PrivateRootCA
+      Certificate: !Ref PrivateRootCACertificate
+      Status: ACTIVE
+
+Outputs:
+  PrivateCaArn:
+    Description: ARN of the Root Private CA
+    Value: !Ref PrivateRootCA
+
+  CrlBucketName:
+    Description: S3 bucket for CRL distribution
+    Value: !Ref PrivateCaCrlBucket

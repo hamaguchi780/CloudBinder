@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS Private CA (Root CA)
+
+############################################################
+# Parameters
+############################################################
+Parameters:
+  PrivateCaCommonName:
+    Type: String
+    Description: >
+      Common Name (CN) for the Root CA.
+    Default: backup-client-root-ca
+
+  OrganizationName:
+    Type: String
+    Default: Example Medical System
+
+  OrganizationalUnitName:
+    Type: String
+    Default: IT
+
+  CountryCode:
+    Type: String
+    Default: JP
+
+  CaValidityYears:
+    Type: Number
+    Default: 10
+    Description: >
+      Validity period of the Root CA in years.
+
+############################################################
+# Resources
+############################################################
+
+# ----------------------------------------------------------
+# CRL Distribution Bucket
+# ----------------------------------------------------------
+PrivateCaCrlBucket:
+  Type: AWS::S3::Bucket
+  Properties:
+    BucketEncryption:
+      ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+    PublicAccessBlockConfiguration:
+      BlockPublicAcls: true
+      BlockPublicPolicy: true
+      IgnorePublicAcls: true
+      RestrictPublicBuckets: true
+    VersioningConfiguration:
+      Status: Enabled
+  DeletionPolicy: Retain
+  UpdateReplacePolicy: Retain
+
+# ----------------------------------------------------------
+# AWS Private CA (Root CA)
+# ----------------------------------------------------------
+PrivateCertificateAuthority:
+  Type: AWS::ACMPCA::CertificateAuthority
+  Properties:
+    Type: ROOT
+    KeyAlgorithm: RSA_4096
+    SigningAlgorithm: SHA384WITHRSA
+      Country: !Ref CountryCode
+    RevocationConfiguration:
+      CrlConfiguration:
+        Enabled: true
+        S3BucketName: !Ref PrivateCaCrlBucket
+    UsageMode: GENERAL_PURPOSE
+
+############################################################
+# Outputs
+############################################################
+Outputs:
+  PrivateCaArn:
+    Description: >
+      ARN of the AWS Private CA (Root CA).
+    Value: !Ref PrivateCertificateAuthority
+
+  PrivateCaCrlBucketName:
+    Description: >
+      S3 bucket name used for CRL distribution.
+    Value: !Ref PrivateCaCrlBucket
