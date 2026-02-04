@@ -1,42 +1,31 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Control Plane stack for Cloud Binder.
-  Provides mTLS-protected API Gateway and Lambda
-  to issue S3 Presigned URLs.
-  Environment-specific stack.
+  Control Plane stack for Binder.
+  API Gateway (HTTP API) with mTLS and Lambda for presigned URL + LIST.
 
 Parameters:
   Env:
     Type: String
     AllowedValues: [prod, stg]
-    Description: Deployment environment
 
-  ApiDomainName:
+  LambdaCodeBucket:
     Type: String
-    Description: Custom domain name for API (e.g. api.example.jp)
+    Description: S3 bucket storing Lambda deployment packages
 
-  AcmCertificateArn:
+  LambdaCodeKey:
     Type: String
-    Description: ACM certificate ARN for API custom domain
+    Description: S3 key for presign Lambda zip
 
-  TrustStoreBucketName:
-    Type: String
-    Description: S3 bucket name containing mTLS trust store
-
-  TrustStoreObjectKey:
-    Type: String
-    Description: S3 object key for trust store (PEM)
+Resources:
 
 ########################################
 # IAM Role for Lambda
 ########################################
 
-Resources:
-
   PresignLambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub binder-${Env}-presign-lambda-role
+      RoleName: !Sub binder-${Env}-presign-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -47,17 +36,23 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: AllowPresignS3
+        - PolicyName: binder-presign-s3
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # Presigned URL generation
               - Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
+                Resource: arn:aws:s3:::binder-*/*
+
+              # LIST support (Lambda direct call)
+              - Effect: Allow
+                Action:
                   - s3:ListBucket
-                Resource: '*'
+                Resource: arn:aws:s3:::binder-*
 
 ########################################
 # Lambda Function
@@ -68,41 +63,32 @@ Resources:
     Properties:
       FunctionName: !Sub binder-${Env}-presign
       Runtime: python3.12
-      Handler: index.handler
+      Handler: index.lambda_handler
       Role: !GetAtt PresignLambdaRole.Arn
       Timeout: 10
       MemorySize: 256
       Environment:
         Variables:
-          ENV: !Ref Env
+          BINDER_ENV: !Ref Env
+          BUCKET_PREFIX: binder
+          EXPIRE_PUT: "900"
+          EXPIRE_GET: "300"
       Code:
-        ZipFile: |
-          def handler(event, context):
-              return {
-                  "statusCode": 503,
-                  "body": "Lambda code not deployed yet"
-              }
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
 
 ########################################
-# API Gateway HTTP API
+# API Gateway (HTTP API)
 ########################################
 
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: !Sub binder-${Env}-http-api
+      Name: !Sub binder-${Env}-api
       ProtocolType: HTTP
 
-  ApiStage:
-    Type: AWS::ApiGatewayV2::Stage
-    Properties:
-      ApiId: !Ref HttpApi
-      StageName: $default
-      AutoDeploy: true
-
 ########################################
-# Lambda Integration
-# 2015-03-31 は「API Gateway が Lambda を呼ぶための固定バージョン番号」     
+# API Integration
 ########################################
 
   PresignIntegration:
@@ -114,58 +100,52 @@ Resources:
         arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PresignLambda.Arn}/invocations
       PayloadFormatVersion: '2.0'
 
-  PresignRoute:
+########################################
+# API Routes
+########################################
+
+  RoutePut:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: POST /presign
+      RouteKey: "PUT /objects/{filename}"
+      Target: !Sub integrations/${PresignIntegration}
+
+  RouteGet:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /objects/{filename}"
+      Target: !Sub integrations/${PresignIntegration}
+
+  RouteDelete:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "DELETE /objects/{filename}"
+      Target: !Sub integrations/${PresignIntegration}
+
+  # LIST (必須)
+  RouteList:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /objects"
       Target: !Sub integrations/${PresignIntegration}
 
 ########################################
-# Lambda Permission
+# Lambda Permission for API Gateway
 ########################################
 
   AllowApiInvokeLambda:
     Type: AWS::Lambda::Permission
     Properties:
-      Action: lambda:InvokeFunction
       FunctionName: !Ref PresignLambda
+      Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
-
-########################################
-# Custom Domain + mTLS
-########################################
-
-  ApiDomain:
-    Type: AWS::ApiGatewayV2::DomainName
-    Properties:
-      DomainName: !Ref ApiDomainName
-      DomainNameConfigurations:
-        - CertificateArn: !Ref AcmCertificateArn
-          EndpointType: REGIONAL
-          SecurityPolicy: TLS_1_2
-      MutualTlsAuthentication:
-        TruststoreUri: !Sub s3://${TrustStoreBucketName}/${TrustStoreObjectKey}
-
-  ApiMapping:
-    Type: AWS::ApiGatewayV2::ApiMapping
-    Properties:
-      ApiId: !Ref HttpApi
-      DomainName: !Ref ApiDomain
-      Stage: !Ref ApiStage
-
-########################################
-# Outputs
-########################################
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
 
 Outputs:
   ApiEndpoint:
-    Description: API custom domain endpoint
-    Value: !Sub https://${ApiDomainName}
-
-  HttpApiId:
-    Value: !Ref HttpApi
-
-  LambdaFunctionName:
-    Value: !Ref PresignLambda
+    Description: HTTP API endpoint
+    Value: !GetAtt HttpApi.ApiEndpoint
